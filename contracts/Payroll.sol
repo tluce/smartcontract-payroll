@@ -44,6 +44,9 @@ contract Payroll is Ownable, AutomationCompatibleInterface {
     );
     event PaymentFailed(address indexed recipient, uint256 indexed amount);
 
+    /// Add funds to the contract.
+    receive() external payable {}
+
     /// Add a recipient.
     /// @param recipient the address of the recipient
     /// @param amount the wei amount the recipient will receive
@@ -94,7 +97,7 @@ contract Payroll is Ownable, AutomationCompatibleInterface {
 
     /// Send ETH.
     /// @param recipient the recipient
-    /// @param amount the amount to send
+    /// @param amount the wei amount to send
     function sendEth(address payable recipient, uint256 amount)
         private
         returns (bool succes, bytes memory)
