@@ -9,9 +9,11 @@ require("dotenv").config();
 /** @type import('hardhat/config').HardhatUserConfig */
 
 const GOERLI_RPC_URL =
-  process.env.GOERLI_RPC_URL || "https://goerli.infura.io/v3/";
+  process.env.GOERLI_RPC_URL ||
+  "https://eth-goerli.g.alchemy.com/v2/your-api-key";
 const MAINNET_RPC_URL =
-  process.env.MAINNET_RPC_URL || "https://mainnet.infura.io/v3/";
+  process.env.MAINNET_RPC_URL ||
+  "https://eth-mainnet.g.alchemy.com/v2/your-api-key";
 const PRIVATE_KEY = process.env.PRIVATE_KEY || "0x";
 const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY || "key";
 const REPORT_GAS = process.env.REPORT_GAS || false;
