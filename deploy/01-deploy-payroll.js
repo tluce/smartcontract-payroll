@@ -1,4 +1,4 @@
-const { network, ethers } = require("hardhat");
+const { network } = require("hardhat");
 const {
   developmentChains,
   VERIFICATION_BLOCK_CONFIRMATIONS,
@@ -7,7 +7,7 @@ const { verify } = require("../utils/verify");
 
 module.exports = async (hre) => {
   const { deployer } = await hre.getNamedAccounts();
-  const { deploy, log } = hre.deployments;
+  const { deploy } = hre.deployments;
 
   const blockConfirmations = developmentChains.includes(network.name)
     ? 1
@@ -27,7 +27,6 @@ module.exports = async (hre) => {
     !developmentChains.includes(network.name) &&
     process.env.ETHERSCAN_API_KEY
   ) {
-    log("Verifying...");
     await verify(payroll.address, arguments);
   }
 };

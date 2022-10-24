@@ -102,7 +102,13 @@ contract Payroll is Ownable, AutomationCompatibleInterface {
         private
         returns (bool succes, bytes memory)
     {
-        return recipient.call{value: amount}("");
+        if (
+            recipient == owner() || s_recipientsPayments[recipient].amount > 0
+        ) {
+            return recipient.call{value: amount}("");
+        } else {
+            return (false, "0x");
+        }
     }
 
     /// Withdraw the contract funds.
@@ -187,15 +193,15 @@ contract Payroll is Ownable, AutomationCompatibleInterface {
                         address(this).balance
                     );
                 } else {
+                    uint256 lastSuccessfulTimestamp = paymentSchedule
+                        .lastTimestamp;
+                    paymentSchedule.lastTimestamp = block.timestamp;
+                    s_recipientsPayments[recipientsToPay[i]] = paymentSchedule;
                     (bool success, ) = sendEth(
                         payable(recipientsToPay[i]),
                         paymentSchedule.amount
                     );
                     if (success) {
-                        paymentSchedule.lastTimestamp = block.timestamp;
-                        s_recipientsPayments[
-                            recipientsToPay[i]
-                        ] = paymentSchedule;
                         emit Transfer(
                             address(this),
                             recipientsToPay[i],
@@ -203,6 +209,10 @@ contract Payroll is Ownable, AutomationCompatibleInterface {
                         );
                     } else {
                         // we don't want to revert the previous successul payments
+                        paymentSchedule.lastTimestamp = lastSuccessfulTimestamp;
+                        s_recipientsPayments[
+                            recipientsToPay[i]
+                        ] = paymentSchedule;
                         emit PaymentFailed(
                             recipientsToPay[i],
                             paymentSchedule.amount
