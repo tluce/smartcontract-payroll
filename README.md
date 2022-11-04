@@ -35,8 +35,8 @@ Add a recipient:
 ```sol
 addRecipient(
         address recipient,
-        uint256 amount, // wei amount the recipient will receive
-        uint256 interval // how often in seconds the recipient will receive the amount
+        uint256 amount, // wei amount the recipient will be allocated
+        uint256 interval // how often in seconds the recipient will be allocated the amount
 )
 ```
 
