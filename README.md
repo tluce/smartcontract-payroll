@@ -16,6 +16,7 @@ yarn hardhat test
 ```
 
 If the `REPORT_GAS` environment variable is true, a `gas-report.txt` file is created when you run tests.
+
 3. Deploy the contract
 ```sh
 yarn hardhat deploy --network goerli
