@@ -32,23 +32,23 @@ developmentChains.includes(network.name)
             `The Payroll contract at ${payroll.address} must have at least 0.01 ETH to run the staging tests.`
           );
 
-          // get the recipients' initial balances
-          const recipient1InitialBalance = await payroll.provider.getBalance(
+          // get the recipients' initial payment balances
+          const recipient1InitialPaymentBalance = await payroll.balanceOf(
             RECIPIENT_1_ADDRESS
           );
-          const recipient2InitialBalance = await payroll.provider.getBalance(
+          const recipient2InitialPaymentBalance = await payroll.balanceOf(
             RECIPIENT_2_ADDRESS
           );
           console.log("----------------------");
-          console.log("Recipient's initial balances:");
+          console.log("Recipients' initial payment balances:");
           console.log(
             `${ethers.utils.formatEther(
-              recipient1InitialBalance
+              recipient1InitialPaymentBalance
             )} ETH for ${RECIPIENT_1_ADDRESS}`
           );
           console.log(
             `${ethers.utils.formatEther(
-              recipient2InitialBalance
+              recipient2InitialPaymentBalance
             )} ETH for ${RECIPIENT_2_ADDRESS}`
           );
 
@@ -61,13 +61,11 @@ developmentChains.includes(network.name)
           await payroll.addRecipient(RECIPIENT_2_ADDRESS, pay, 20);
 
           await new Promise(async (resolve, reject) => {
-            try {
-              const transferFilter = payroll.filters.Transfer(
-                payroll.address,
-                RECIPIENT_2_ADDRESS
-              );
-              // listen to the second recipient's payment
-              payroll.once(transferFilter, async () => {
+            const paymentDoneFilter =
+              payroll.filters.PaymentDone(RECIPIENT_2_ADDRESS);
+            // listen to the second recipient's payment
+            payroll.once(paymentDoneFilter, async () => {
+              try {
                 // remove recipients
                 console.log("----------------------");
                 console.log(`Removing recipient ${RECIPIENT_1_ADDRESS}...`);
@@ -75,36 +73,42 @@ developmentChains.includes(network.name)
                 console.log(`Removing recipient ${RECIPIENT_2_ADDRESS}...`);
                 await payroll.removeRecipient(RECIPIENT_2_ADDRESS);
 
-                // get the recipients' final balances
-                const recipient1FinalBalance =
-                  await payroll.provider.getBalance(RECIPIENT_1_ADDRESS);
-                const recipient2FinalBalance =
-                  await payroll.provider.getBalance(RECIPIENT_2_ADDRESS);
+                // get the recipients' final payment balances
+                const recipient1FinalPaymentBalance = await payroll.balanceOf(
+                  RECIPIENT_1_ADDRESS
+                );
+                const recipient2FinalPaymentBalance = await payroll.balanceOf(
+                  RECIPIENT_2_ADDRESS
+                );
                 console.log("----------------------");
-                console.log("Recipient's final balances:");
+                console.log("Recipients' final payment balances:");
                 console.log(
                   `${ethers.utils.formatEther(
-                    recipient1FinalBalance
+                    recipient1FinalPaymentBalance
                   )} ETH for ${RECIPIENT_1_ADDRESS}`
                 );
                 console.log(
                   `${ethers.utils.formatEther(
-                    recipient2FinalBalance
+                    recipient2FinalPaymentBalance
                   )} ETH for ${RECIPIENT_2_ADDRESS}`
                 );
 
                 assert.isTrue(
-                  recipient1FinalBalance.gt(recipient1InitialBalance)
+                  recipient1FinalPaymentBalance.gt(
+                    recipient1InitialPaymentBalance
+                  )
                 );
                 assert.isTrue(
-                  recipient2FinalBalance.gt(recipient2InitialBalance)
+                  recipient2FinalPaymentBalance.gt(
+                    recipient2InitialPaymentBalance
+                  )
                 );
                 resolve();
-              });
-            } catch (error) {
-              console.log(error);
-              reject();
-            }
+              } catch (error) {
+                console.log(error);
+                reject();
+              }
+            });
           });
         });
       });

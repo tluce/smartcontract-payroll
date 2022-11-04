@@ -10,7 +10,7 @@ const { developmentChains } = require("../../helper-hardhat-config");
 
       const fundContract = async (ethAmount) => {
         const amount = ethers.utils.parseEther(ethAmount);
-        let txResponse = await owner.sendTransaction({
+        const txResponse = await owner.sendTransaction({
           to: payroll.address,
           value: amount,
         });
@@ -68,7 +68,7 @@ const { developmentChains } = require("../../helper-hardhat-config");
             amount,
             interval
           );
-          const txReceipt = await txResponse.wait(1);
+          const txReceipt = await txResponse.wait();
           assert.equal(txReceipt.events[0].event, "RecipientAdded");
           assert.equal(
             txReceipt.events[0].args.recipient,
@@ -106,6 +106,41 @@ const { developmentChains } = require("../../helper-hardhat-config");
           assert.equal(paymentSchedule.amount, 0);
           assert.equal(paymentSchedule.interval, 0);
           assert.equal(paymentSchedule.lastTimestamp, 0);
+        });
+
+        it("removing a recipient doesn't prevent withdrawing payments", async () => {
+          // add a recipient to get a payment
+          await fundContract("1");
+          const interval = 30;
+          const amount = 10;
+          await payroll.addRecipient(
+            recipientAccount.address,
+            amount,
+            interval
+          );
+          await network.provider.send("evm_increaseTime", [interval + 1]);
+          await network.provider.request({ method: "evm_mine", params: [] });
+          [upkeepNeeded, performData] = await payroll.checkUpkeep([]);
+          await payroll.performUpkeep(performData);
+
+          // remove the recipient
+          let txResponse = await payroll.removeRecipient(
+            recipientAccount.address
+          );
+          await txResponse.wait();
+
+          // withdraw the recipient's payment
+          const connectedPayroll = payroll.connect(recipientAccount);
+          txResponse = await connectedPayroll.withdrawPayments();
+          const txReceipt = await txResponse.wait();
+
+          assert.equal(txReceipt.events[0].event, "Transfer");
+          assert.equal(txReceipt.events[0].args.from, payroll.address);
+          assert.equal(txReceipt.events[0].args.to, recipientAccount.address);
+          assert.equal(
+            txReceipt.events[0].args.amount.toString(),
+            amount.toString()
+          );
         });
       });
 
@@ -156,8 +191,127 @@ const { developmentChains } = require("../../helper-hardhat-config");
         });
       });
 
+      describe("withdrawPayments", () => {
+        it("a non recipient cannot withdraw payments", async () => {
+          await fundContract("1");
+          const interval = 30;
+          await payroll.addRecipient(recipientAccount.address, 10, interval);
+          await network.provider.send("evm_increaseTime", [interval + 1]);
+          await network.provider.request({ method: "evm_mine", params: [] });
+          [upkeepNeeded, performData] = await payroll.checkUpkeep([]);
+          await payroll.performUpkeep(performData);
+
+          const recipientInitialBalance = await payroll.provider.getBalance(
+            recipientAccount.address
+          );
+          const attackerAccount = accounts[2];
+          const attackerInitialBalance = await payroll.provider.getBalance(
+            attackerAccount.address
+          );
+          const connectedPayroll = payroll.connect(attackerAccount);
+          const txResponse = await connectedPayroll.withdrawPayments();
+          // get the gas cost
+          const { gasUsed, effectiveGasPrice } = await txResponse.wait();
+          const gasCost = gasUsed.mul(effectiveGasPrice);
+
+          const recipientFinalBalance = await payroll.provider.getBalance(
+            recipientAccount.address
+          );
+          const attackerFinalBalance = await payroll.provider.getBalance(
+            attackerAccount.address
+          );
+          assert.isTrue(recipientInitialBalance.gt(0));
+          assert.equal(
+            recipientInitialBalance.toString(),
+            recipientFinalBalance.toString()
+          );
+          assert.equal(
+            attackerInitialBalance.sub(gasCost).toString(),
+            attackerFinalBalance.toString()
+          );
+        });
+
+        it("a recipient can withdraw payments and a Transfer event is emitted", async () => {
+          await fundContract("1");
+          const interval = 30;
+          const paymentAmount = 50;
+          await payroll.addRecipient(
+            recipientAccount.address,
+            paymentAmount,
+            interval
+          );
+          await network.provider.send("evm_increaseTime", [interval + 1]);
+          await network.provider.request({ method: "evm_mine", params: [] });
+          [upkeepNeeded, performData] = await payroll.checkUpkeep([]);
+          await payroll.performUpkeep(performData);
+
+          const initialBalance = await payroll.provider.getBalance(
+            recipientAccount.address
+          );
+          const connectedPayroll = payroll.connect(recipientAccount);
+          const txResponse = await connectedPayroll.withdrawPayments();
+          // get the gas cost
+          const txReceipt = await txResponse.wait();
+          const gasCost = txReceipt.gasUsed.mul(txReceipt.effectiveGasPrice);
+          const finalBalance = await payroll.provider.getBalance(
+            recipientAccount.address
+          );
+
+          assert.equal(txReceipt.events[0].event, "Transfer");
+          assert.equal(txReceipt.events[0].args.from, payroll.address);
+          assert.equal(txReceipt.events[0].args.to, recipientAccount.address);
+          assert.equal(
+            txReceipt.events[0].args.amount.toString(),
+            paymentAmount.toString()
+          );
+          assert.equal(
+            initialBalance.add(paymentAmount).sub(gasCost).toString(),
+            finalBalance.toString()
+          );
+          assert.equal(0, await payroll.balanceOf(recipientAccount.address));
+        });
+
+        it("emits InsufficientBalance when the contract balance is not enough and doesn't change the recipient's payment balance", async () => {
+          const interval = 30;
+          const paymentAmount = 5000;
+          await payroll.addRecipient(
+            recipientAccount.address,
+            paymentAmount,
+            interval
+          );
+          await network.provider.send("evm_increaseTime", [interval + 1]);
+          await network.provider.request({ method: "evm_mine", params: [] });
+          [upkeepNeeded, performData] = await payroll.checkUpkeep([]);
+          await payroll.performUpkeep(performData);
+
+          const initialPaymentBalance = await payroll.balanceOf(
+            recipientAccount.address
+          );
+          const connectedPayroll = payroll.connect(recipientAccount);
+          const txResponse = await connectedPayroll.withdrawPayments();
+          const txReceipt = await txResponse.wait();
+          assert.equal(txReceipt.events[0].event, "InsufficientBalance");
+          assert.equal(
+            txReceipt.events[0].args.requiredAmount.toString(),
+            (await payroll.balanceOf(recipientAccount.address)).toString()
+          );
+          assert.equal(
+            txReceipt.events[0].args.recipient,
+            recipientAccount.address
+          );
+          assert.equal(
+            txReceipt.events[0].args.contractBalance.toString(),
+            (await payroll.provider.getBalance(payroll.address)).toString()
+          );
+          assert.equal(
+            initialPaymentBalance.toString(),
+            (await payroll.balanceOf(recipientAccount.address)).toString()
+          );
+        });
+      });
+
       describe("checkUpkeep", () => {
-        it("returns true when enough time has passed for at leat one recipient and returns eligible recipients", async () => {
+        it("returns true when enough time has passed for at least one recipient and returns eligible recipients", async () => {
           const interval = 30;
           await payroll.addRecipient(recipientAccount.address, 10, interval);
           await payroll.addRecipient(accounts[2].address, 10, 5000);
@@ -225,59 +379,7 @@ const { developmentChains } = require("../../helper-hardhat-config");
           );
         });
 
-        it("emits InsufficientBalance when a recipient requests too much and pays the eligible recipients left", async () => {
-          await fundContract("1");
-          const interval = 30;
-          const largeAmount = ethers.utils.parseEther("2");
-          await payroll.addRecipient(
-            recipientAccount.address,
-            largeAmount,
-            interval
-          );
-          const smallAmount = ethers.utils.parseEther("0.1");
-          await payroll.addRecipient(
-            accounts[2].address,
-            smallAmount,
-            interval
-          );
-          const recipient1InitialBalance = await payroll.provider.getBalance(
-            recipientAccount.address
-          );
-          const recipient2InitialBalance = await payroll.provider.getBalance(
-            accounts[2].address
-          );
-          await network.provider.send("evm_increaseTime", [interval + 1]);
-          await network.provider.request({ method: "evm_mine", params: [] });
-          [upkeepNeeded, performData] = await payroll.checkUpkeep([]);
-          const txResponse = await payroll.performUpkeep(performData);
-          const txReceipt = await txResponse.wait(1);
-
-          assert.equal(txReceipt.events[0].event, "InsufficientBalance");
-          assert.equal(
-            txReceipt.events[0].args.recipient,
-            recipientAccount.address
-          );
-          assert.equal(
-            txReceipt.events[0].args.requiredAmount.toString(),
-            largeAmount.toString()
-          );
-          assert.equal(
-            txReceipt.events[0].args.balance.toString(),
-            ethers.utils.parseEther("1").toString()
-          );
-          assert.equal(
-            (
-              await payroll.provider.getBalance(recipientAccount.address)
-            ).toString(),
-            recipient1InitialBalance.toString()
-          );
-          assert.equal(
-            (await payroll.provider.getBalance(accounts[2].address)).toString(),
-            recipient2InitialBalance.add(smallAmount).toString()
-          );
-        });
-
-        it("emits a Transfer event when a payment is made", async () => {
+        it("updates a recipient's payment balance and emits a PaymentDone event when a payment is done", async () => {
           await fundContract("1");
           const amount = ethers.utils.parseEther("0.5");
           const interval = 30;
@@ -292,19 +394,23 @@ const { developmentChains } = require("../../helper-hardhat-config");
           const txResponse = await payroll.performUpkeep(performData);
           const txReceipt = await txResponse.wait(1);
 
-          assert.equal(txReceipt.events[0].event, "Transfer");
-          assert.equal(txReceipt.events[0].args.from, payroll.address);
+          assert.equal(txReceipt.events[0].event, "PaymentDone");
+          assert.equal(
+            txReceipt.events[0].args.recipient,
+            recipientAccount.address
+          );
           assert.equal(
             txReceipt.events[0].args.amount.toString(),
             amount.toString()
+          );
+          assert.equal(
+            amount.toString(),
+            (await payroll.balanceOf(recipientAccount.address)).toString()
           );
         });
 
         it("pays a recipient as long as a payment is due", async () => {
           await fundContract("1");
-          const recipientInitialBalance = await payroll.provider.getBalance(
-            recipientAccount.address
-          );
           const amount = ethers.utils.parseEther("0.1");
           const interval = 30;
           await payroll.addRecipient(
@@ -321,10 +427,8 @@ const { developmentChains } = require("../../helper-hardhat-config");
           }
 
           assert.equal(
-            (
-              await payroll.provider.getBalance(recipientAccount.address)
-            ).toString(),
-            recipientInitialBalance.add(amount.mul(nbOfPayments)).toString()
+            (await payroll.balanceOf(recipientAccount.address)).toString(),
+            amount.mul(nbOfPayments).toString()
           );
         });
 
@@ -335,18 +439,7 @@ const { developmentChains } = require("../../helper-hardhat-config");
           const amount2 = ethers.utils.parseEther("0.2");
           const amount3 = ethers.utils.parseEther("0.3");
           const amount4 = ethers.utils.parseEther("0.4");
-          const initialBalance1 = await payroll.provider.getBalance(
-            recipientAccount.address
-          );
-          const initialBalance2 = await payroll.provider.getBalance(
-            accounts[2].address
-          );
-          const initialBalance3 = await payroll.provider.getBalance(
-            accounts[3].address
-          );
-          const initialBalance4 = await payroll.provider.getBalance(
-            accounts[4].address
-          );
+
           await payroll.addRecipient(
             recipientAccount.address,
             amount1,
@@ -369,22 +462,20 @@ const { developmentChains } = require("../../helper-hardhat-config");
           await payroll.performUpkeep(performData);
 
           assert.equal(
-            (
-              await payroll.provider.getBalance(recipientAccount.address)
-            ).toString(),
-            initialBalance1.add(amount1).toString()
+            (await payroll.balanceOf(recipientAccount.address)).toString(),
+            amount1.toString()
           );
           assert.equal(
-            (await payroll.provider.getBalance(accounts[2].address)).toString(),
-            initialBalance2.add(amount2).toString()
+            (await payroll.balanceOf(accounts[2].address)).toString(),
+            amount2.toString()
           );
           assert.equal(
-            (await payroll.provider.getBalance(accounts[3].address)).toString(),
-            initialBalance3.add(amount3).toString()
+            (await payroll.balanceOf(accounts[3].address)).toString(),
+            amount3.toString()
           );
           assert.equal(
-            (await payroll.provider.getBalance(accounts[4].address)).toString(),
-            initialBalance4.toString()
+            (await payroll.balanceOf(accounts[4].address)).toString(),
+            "0"
           );
         });
       });
